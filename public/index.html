@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>答えてネット | 回答する</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap" style="max-width: 480px;">
+  <p class="eyebrow">答えてネット</p>
+  <h1 class="title">回答する</h1>
+  <p class="subtitle">画面に表示されたコードを入力してください</p>
+
+  <div class="card" id="code-card">
+    <label for="room-input">ルームID</label>
+    <input type="text" id="room-input" placeholder="先生から共有されたルームID" autocomplete="off">
+    <label for="code-input">回答コード</label>
+    <input type="text" id="code-input" placeholder="例：3841 または keyword" autocomplete="off">
+    <div class="row" style="margin-top:16px;">
+      <button id="code-submit">回答画面へ</button>
+    </div>
+    <div id="code-msg"></div>
+  </div>
+
+  <div class="card" id="question-card" style="display:none;">
+    <span class="pill open" id="q-status">受付中</span>
+    <h2 id="q-title" style="margin-top:12px;"></h2>
+
+    <div id="name-area" style="display:none;">
+      <label for="name-input">お名前（この設問は記名式です）</label>
+      <input type="text" id="name-input" placeholder="名前を入力">
+    </div>
+
+    <div id="choice-area"></div>
+    <div id="text-area" style="display:none;">
+      <textarea id="text-input" rows="3" placeholder="回答を入力してください（200文字以内）"></textarea>
+      <button id="text-submit" style="margin-top:12px; width:100%;">回答を送信</button>
+    </div>
+    <div id="wordcloud-area" style="display:none;">
+      <input type="text" id="wordcloud-input" placeholder="一言で入力（30文字以内）" maxlength="30">
+      <button id="wordcloud-submit" style="margin-top:12px; width:100%;">回答を送信</button>
+    </div>
+    <div id="answer-msg"></div>
+  </div>
+
+  <div class="card" id="done-card" style="display:none;">
+    <div class="center-note">
+      <div style="font-size:2.4rem;">✅</div>
+      <p>回答を受け付けました。<br>ありがとうございました！</p>
+      <button class="secondary" id="reset-btn">別のコードを入力する</button>
+    </div>
+  </div>
+
+  <p class="footer-note">答えてネット モダン版</p>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+
+const codeCard = document.getElementById('code-card');
+const questionCard = document.getElementById('question-card');
+const doneCard = document.getElementById('done-card');
+const roomInput = document.getElementById('room-input');
+const codeInput = document.getElementById('code-input');
+const codeMsg = document.getElementById('code-msg');
+const qTitle = document.getElementById('q-title');
+const qStatus = document.getElementById('q-status');
+const nameArea = document.getElementById('name-area');
+const nameInput = document.getElementById('name-input');
+const choiceArea = document.getElementById('choice-area');
+const textArea = document.getElementById('text-area');
+const textInput = document.getElementById('text-input');
+const wordcloudArea = document.getElementById('wordcloud-area');
+const wordcloudInput = document.getElementById('wordcloud-input');
+const answerMsg = document.getElementById('answer-msg');
+
+let currentRoom = null;
+let currentCode = null;
+let currentQuestion = null;
+
+// URLパラメータに room/code があれば自動入力・自動照会（QRコード経由）
+const params = new URLSearchParams(location.search);
+if (params.get('room')) roomInput.value = params.get('room');
+if (params.get('code')) codeInput.value = params.get('code');
+if (params.get('room') && params.get('code')) checkCode();
+
+function showMsg(el, text, type) {
+  el.innerHTML = text ? `<div class="msg ${type}">${text}</div>` : '';
+}
+
+function checkCode() {
+  const roomId = roomInput.value.trim();
+  const code = codeInput.value.trim();
+  if (!roomId || !code) {
+    showMsg(codeMsg, 'ルームIDと回答コードの両方を入力してください。', 'error');
+    return;
+  }
+  showMsg(codeMsg, '', '');
+  socket.emit('code:check', { roomId, code }, (res) => {
+    if (!res.ok) {
+      showMsg(codeMsg, res.error, 'error');
+      return;
+    }
+    currentRoom = roomId;
+    currentCode = code;
+    currentQuestion = res.question;
+    renderQuestion();
+  });
+}
+
+function renderQuestion() {
+  codeCard.style.display = 'none';
+  doneCard.style.display = 'none';
+  questionCard.style.display = 'block';
+  qTitle.textContent = currentQuestion.title;
+
+  nameArea.style.display = currentQuestion.anonymous ? 'none' : 'block';
+  nameInput.value = '';
+
+  choiceArea.style.display = 'none';
+  textArea.style.display = 'none';
+  wordcloudArea.style.display = 'none';
+
+  if (currentQuestion.type === 'choice') {
+    choiceArea.style.display = 'block';
+    choiceArea.innerHTML = currentQuestion.choices.map((c, i) =>
+      `<button class="choice-btn" data-idx="${i}"><span class="idx">${i + 1}</span>${escapeHtml(c)}</button>`
+    ).join('');
+    choiceArea.querySelectorAll('.choice-btn').forEach((btn) => {
+      btn.addEventListener('click', () => submitAnswer({ choiceIndex: Number(btn.dataset.idx) }));
+    });
+  } else if (currentQuestion.type === 'wordcloud') {
+    wordcloudArea.style.display = 'block';
+    wordcloudInput.value = '';
+  } else {
+    textArea.style.display = 'block';
+    textInput.value = '';
+  }
+}
+
+document.getElementById('text-submit').addEventListener('click', () => {
+  submitAnswer({ text: textInput.value });
+});
+document.getElementById('wordcloud-submit').addEventListener('click', () => {
+  submitAnswer({ text: wordcloudInput.value });
+});
+
+function submitAnswer(payload) {
+  if (!currentQuestion.anonymous) {
+    const n = nameInput.value.trim();
+    if (!n) {
+      showMsg(answerMsg, 'お名前を入力してください。', 'error');
+      return;
+    }
+    payload.name = n;
+  }
+  showMsg(answerMsg, '', '');
+  socket.emit('answer:submit', { roomId: currentRoom, code: currentCode, ...payload }, (res) => {
+    if (!res.ok) {
+      showMsg(answerMsg, res.error, 'error');
+      return;
+    }
+    questionCard.style.display = 'none';
+    doneCard.style.display = 'block';
+  });
+}
+
+document.getElementById('code-submit').addEventListener('click', checkCode);
+[roomInput, codeInput].forEach(el => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') checkCode(); }));
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  doneCard.style.display = 'none';
+  codeCard.style.display = 'block';
+  codeInput.value = '';
+  history.replaceState(null, '', location.pathname);
+});
+
+socket.on('question:update', (q) => {
+  if (currentQuestion && q && q.id === currentQuestion.id && q.status === 'closed') {
+    currentQuestion.status = 'closed';
+    if (questionCard.style.display !== 'none') {
+      showMsg(answerMsg, 'この設問の受付は終了しました。', 'error');
+      choiceArea.querySelectorAll('button').forEach(b => b.disabled = true);
+      document.getElementById('text-submit').disabled = true;
+      document.getElementById('wordcloud-submit').disabled = true;
+    }
+  }
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

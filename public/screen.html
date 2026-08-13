@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>答えてネット | スクリーン</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">答えてネット</p>
+  <h1 class="title">スクリーン / 先生用</h1>
+  <p class="subtitle">投影用画面 兼 設問の作成・管理</p>
+
+  <!-- ルームログイン -->
+  <div class="card" id="login-card">
+    <label for="room-id-input">ルームID</label>
+    <input type="text" id="room-id-input" placeholder="例：sato-kougi101（半角英数字）">
+    <label for="pw-input">パスワード</label>
+    <input type="text" id="pw-input" placeholder="パスワードを入力">
+    <p style="color:var(--chalk-dim); font-size:0.82rem; margin-top:10px;">
+      初めて使うルームIDの場合、ここで入力したパスワードがそのまま設定されます。次回から同じルームID・パスワードでログインしてください。
+    </p>
+    <div class="row" style="margin-top:16px;">
+      <button id="login-btn">ログイン / ルームを開始</button>
+    </div>
+    <div id="login-msg"></div>
+  </div>
+
+  <!-- 設問作成フォーム -->
+  <div class="card" id="create-card" style="display:none;">
+    <h3 style="margin-top:0;">新しい設問を作成</h3>
+    <label for="q-title-input">設問タイトル（画面表示用・任意）</label>
+    <input type="text" id="q-title-input" placeholder="例：今日のランチはどれが良い？">
+
+    <label for="q-type-select">回答形式</label>
+    <select id="q-type-select">
+      <option value="choice">選択肢（番号で回答）</option>
+      <option value="text">自由記述（一覧表示）</option>
+      <option value="wordcloud">一言ワードクラウド</option>
+    </select>
+
+    <div id="choices-config">
+      <label>選択肢（2〜6個）</label>
+      <div id="choices-list"></div>
+      <button class="secondary" id="add-choice-btn" type="button" style="margin-top:6px;">+ 選択肢を追加</button>
+    </div>
+
+    <label for="q-keyword-input">キーワード（任意・空欄なら4桁の数字コードを自動発行）</label>
+    <input type="text" id="q-keyword-input" placeholder="半角英数字（例：sansu01）">
+
+    <label style="display:flex; align-items:center; gap:8px; margin-top:16px; cursor:pointer;">
+      <input type="checkbox" id="q-anonymous-check" style="width:auto;" checked>
+      <span style="font-size:0.9rem; color:var(--chalk);">匿名で回答を受け付ける（チェックを外すと記名式になります）</span>
+    </label>
+
+    <div class="row" style="margin-top:18px;">
+      <button id="create-btn">この設問を開始する</button>
+    </div>
+    <div id="create-msg"></div>
+  </div>
+
+  <!-- 現在の設問 & QR & 結果 -->
+  <div id="live-card" style="display:none;">
+    <div class="card">
+      <div class="row" style="align-items:center; justify-content:space-between; flex-wrap:wrap;">
+        <div>
+          <span class="pill" id="live-status"></span>
+          <span class="pill" id="live-anon" style="margin-left:6px; background:rgba(179,157,219,0.18); color:var(--violet); border:1px solid rgba(179,157,219,0.4);"></span>
+          <h2 id="live-title" style="margin: 10px 0 4px;"></h2>
+          <div class="code-display" id="live-code"></div>
+        </div>
+        <div class="qr-box" id="qr-box"></div>
+      </div>
+      <div class="row" style="margin-top:18px;">
+        <button class="danger" id="close-btn">受付を終了する</button>
+        <button class="secondary" id="new-question-btn">新しい設問を作る</button>
+      </div>
+    </div>
+
+    <div class="card" id="results-card">
+      <div class="row" style="align-items:center; justify-content:space-between; flex-wrap:wrap;">
+        <h3 style="margin: 0 0 12px;">回答結果（リアルタイム）</h3>
+        <div class="row" style="width:auto; gap:8px;">
+          <button class="secondary" id="export-csv-btn" type="button">CSVで保存</button>
+          <button class="secondary" id="export-png-btn" type="button">画像で保存</button>
+        </div>
+      </div>
+      <div class="total-count" id="total-count"></div>
+      <div id="results-choice"></div>
+      <div id="results-wordcloud" class="wordcloud-box"></div>
+      <div id="results-text" class="text-answers"></div>
+    </div>
+  </div>
+
+  <p class="footer-note">学生用ページ： <span id="student-url"></span></p>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+const socket = io();
+
+const loginCard = document.getElementById('login-card');
+const createCard = document.getElementById('create-card');
+const liveCard = document.getElementById('live-card');
+const roomIdInput = document.getElementById('room-id-input');
+const pwInput = document.getElementById('pw-input');
+const loginMsg = document.getElementById('login-msg');
+
+let currentRoom = null;
+let currentQuestion = null;
+let currentResults = null;
+
+// ルームIDはブラウザに記憶しておく（毎回入力しなくて済むように）
+const savedRoom = localStorage.getItem('kotaete_room_id');
+if (savedRoom) roomIdInput.value = savedRoom;
+
+function showMsg(el, text, type) {
+  el.innerHTML = text ? `<div class="msg ${type}">${text}</div>` : '';
+}
+
+// --- ログイン ---
+function doLogin() {
+  const roomId = roomIdInput.value.trim();
+  const pw = pwInput.value;
+  if (!roomId || !pw) {
+    showMsg(loginMsg, 'ルームIDとパスワードの両方を入力してください。', 'error');
+    return;
+  }
+  socket.emit('room:auth', { roomId, password: pw }, (res) => {
+    if (!res.ok) {
+      showMsg(loginMsg, res.error, 'error');
+      return;
+    }
+    currentRoom = roomId;
+    localStorage.setItem('kotaete_room_id', roomId);
+    document.getElementById('student-url').textContent = `${location.origin}/ （ルームID: ${roomId}）`;
+
+    loginCard.style.display = 'none';
+    currentQuestion = res.question;
+    currentResults = res.results;
+    if (currentQuestion) {
+      renderLive(currentQuestion);
+      renderResults(currentResults);
+    } else {
+      createCard.style.display = 'block';
+    }
+  });
+}
+document.getElementById('login-btn').addEventListener('click', doLogin);
+pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+// --- 選択肢の動的フォーム ---
+const choicesList = document.getElementById('choices-list');
+function addChoiceRow(value = '') {
+  const row = document.createElement('div');
+  row.style.marginBottom = '8px';
+  row.innerHTML = `<input type="text" class="choice-input" placeholder="選択肢を入力" value="${value}">`;
+  choicesList.appendChild(row);
+}
+addChoiceRow(); addChoiceRow();
+document.getElementById('add-choice-btn').addEventListener('click', () => {
+  const count = choicesList.querySelectorAll('.choice-input').length;
+  if (count >= 6) return;
+  addChoiceRow();
+});
+
+document.getElementById('q-type-select').addEventListener('change', (e) => {
+  document.getElementById('choices-config').style.display = e.target.value === 'choice' ? 'block' : 'none';
+});
+
+// --- 設問作成 ---
+document.getElementById('create-btn').addEventListener('click', () => {
+  const type = document.getElementById('q-type-select').value;
+  const title = document.getElementById('q-title-input').value;
+  const keyword = document.getElementById('q-keyword-input').value;
+  const anonymous = document.getElementById('q-anonymous-check').checked;
+  const choices = Array.from(document.querySelectorAll('.choice-input'))
+    .map(i => i.value.trim()).filter(Boolean);
+
+  const payload = { type, title, keyword, anonymous };
+  if (type === 'choice') payload.choices = choices;
+
+  socket.emit('question:create', payload, (res) => {
+    if (!res.ok) {
+      showMsg(document.getElementById('create-msg'), res.error, 'error');
+      return;
+    }
+    showMsg(document.getElementById('create-msg'), '', '');
+  });
+});
+
+document.getElementById('close-btn').addEventListener('click', () => {
+  socket.emit('question:close', () => {});
+});
+
+document.getElementById('new-question-btn').addEventListener('click', () => {
+  liveCard.style.display = 'none';
+  createCard.style.display = 'block';
+});
+
+// --- 状態の反映 ---
+socket.on('question:update', (q) => {
+  currentQuestion = q;
+  renderLive(q);
+});
+
+socket.on('results:update', (results) => {
+  currentResults = results;
+  renderResults(results);
+});
+
+function renderLive(q) {
+  if (!q) return;
+  createCard.style.display = 'none';
+  liveCard.style.display = 'block';
+
+  document.getElementById('live-title').textContent = q.title;
+  document.getElementById('live-code').textContent = q.code;
+  const statusEl = document.getElementById('live-status');
+  statusEl.textContent = q.status === 'open' ? '受付中' : '受付終了';
+  statusEl.className = 'pill ' + (q.status === 'open' ? 'open' : 'closed');
+  document.getElementById('close-btn').disabled = q.status !== 'open';
+
+  const anonEl = document.getElementById('live-anon');
+  anonEl.textContent = q.anonymous ? '匿名' : '記名式';
+
+  loadQr();
+}
+
+function loadQr() {
+  if (!currentRoom) return;
+  fetch(`/api/qr?room=${encodeURIComponent(currentRoom)}`).then(r => r.json()).then((data) => {
+    if (data.error) return;
+    document.getElementById('qr-box').innerHTML =
+      `<img src="${data.dataUrl}" width="160" height="160" alt="QRコード">
+       <div class="url">${data.url}</div>`;
+  });
+}
+
+function renderResults(results) {
+  if (!results) return;
+  document.getElementById('total-count').textContent = `合計 ${results.total} 件の回答`;
+
+  const choiceEl = document.getElementById('results-choice');
+  const wordcloudEl = document.getElementById('results-wordcloud');
+  const textEl = document.getElementById('results-text');
+  choiceEl.style.display = 'none';
+  wordcloudEl.style.display = 'none';
+  textEl.style.display = 'none';
+
+  if (results.type === 'choice') {
+    choiceEl.style.display = 'block';
+    const max = Math.max(1, ...results.counts);
+    choiceEl.innerHTML = results.choices.map((c, i) => {
+      const count = results.counts[i];
+      const pct = Math.max(4, Math.round((count / max) * 100));
+      return `<div class="bar-row">
+        <div class="bar-label"><span>${i + 1}. ${escapeHtml(c)}</span><span>${count}</span></div>
+        <div class="bar-track"><div class="bar-fill c${i % 6}" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('');
+  } else if (results.type === 'wordcloud') {
+    wordcloudEl.style.display = 'flex';
+    if (results.words.length === 0) {
+      wordcloudEl.innerHTML = '<span style="color:var(--chalk-dim)">まだ回答がありません</span>';
+    } else {
+      const max = Math.max(...results.words.map(w => w.count));
+      const min = Math.min(...results.words.map(w => w.count));
+      wordcloudEl.innerHTML = results.words.map((w, i) => {
+        const scale = max === min ? 0.6 : (w.count - min) / (max - min);
+        const size = 1.0 + scale * 2.4; // rem: 1.0〜3.4
+        const cls = `wc-c${i % 6}`;
+        return `<span class="wc-word ${cls}" style="font-size:${size}rem;" title="${w.count}件">${escapeHtml(w.text)}</span>`;
+      }).join('');
+    }
+  } else {
+    textEl.style.display = 'flex';
+    textEl.innerHTML = results.items.slice().reverse().map(item => {
+      const namePrefix = item.name ? `<span class="chip-name">${escapeHtml(item.name)}：</span>` : '';
+      return `<div class="text-answer-chip">${namePrefix}${escapeHtml(item.text)}</div>`;
+    }).join('') || '<span style="color:var(--chalk-dim)">まだ回答がありません</span>';
+  }
+}
+
+// --- エクスポート ---
+document.getElementById('export-csv-btn').addEventListener('click', () => {
+  if (!currentResults || !currentQuestion) return;
+  let rows = [];
+  if (currentResults.type === 'choice') {
+    rows.push(['選択肢', '件数']);
+    currentResults.choices.forEach((c, i) => rows.push([c, currentResults.counts[i]]));
+  } else if (currentResults.type === 'wordcloud') {
+    rows.push(['回答', '件数']);
+    currentResults.words.forEach(w => rows.push([w.text, w.count]));
+  } else {
+    rows.push(['お名前', '回答']);
+    currentResults.items.forEach(item => rows.push([item.name || '(匿名)', item.text]));
+  }
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+  const bom = '\uFEFF'; // Excelでの文字化け防止
+  downloadBlob(bom + csv, `${currentQuestion.title}_結果.csv`, 'text/csv;charset=utf-8;');
+});
+
+function csvEscape(v) {
+  const s = String(v);
+  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('export-png-btn').addEventListener('click', () => {
+  const target = document.getElementById('results-card');
+  html2canvas(target, { backgroundColor: '#1f3b2e', scale: 2 }).then((canvas) => {
+    const link = document.createElement('a');
+    link.download = `${(currentQuestion && currentQuestion.title) || '結果'}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  });
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
