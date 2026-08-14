@@ -13,6 +13,9 @@
   <p class="subtitle">画面に表示されたコードを入力してください</p>
 
   <div class="card" id="code-card">
+    <div class="qr-hint">
+      <i>📷</i> 先生の画面のQRコードを読み取ると、この2つは自動で入力されます
+    </div>
     <label for="room-input">ルームID</label>
     <input type="text" id="room-input" placeholder="先生から共有されたルームID" autocomplete="off">
     <label for="code-input">回答コード</label>
@@ -25,6 +28,7 @@
 
   <div class="card" id="question-card" style="display:none;">
     <span class="pill open" id="q-status">受付中</span>
+    <span class="pill presence-pill" id="q-presence" style="margin-left:6px;"></span>
     <h2 id="q-title" style="margin-top:12px;"></h2>
 
     <div id="name-area" style="display:none;">
@@ -106,6 +110,9 @@ function checkCode() {
     currentRoom = roomId;
     currentCode = code;
     currentQuestion = res.question;
+    if (typeof res.participantCount === 'number') {
+      document.getElementById('q-presence').textContent = `参加者 ${res.participantCount}人`;
+    }
     renderQuestion();
   });
 }
@@ -187,6 +194,11 @@ socket.on('question:update', (q) => {
       document.getElementById('wordcloud-submit').disabled = true;
     }
   }
+});
+
+socket.on('presence:update', ({ count }) => {
+  const el = document.getElementById('q-presence');
+  if (el) el.textContent = `参加者 ${count}人`;
 });
 
 function escapeHtml(str) {

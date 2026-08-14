@@ -130,6 +130,11 @@ function broadcastQuestion(roomId, room) {
   io.to(`room:${roomId}`).emit('question:update', publicQuestionView(room));
 }
 
+function broadcastPresence(roomId) {
+  const size = io.sockets.adapter.rooms.get(`room:${roomId}`)?.size || 0;
+  io.to(`room:${roomId}`).emit('presence:update', { count: size });
+}
+
 // 未使用ルームを定期的に掃除（24時間操作がなければ破棄。メモリ節約）
 setInterval(() => {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -198,6 +203,7 @@ io.on('connection', (socket) => {
         results: computeResults(room),
       });
     }
+    broadcastPresence(roomId);
   });
 
   // 学生がルーム+コードで設問を照会（学生ソケットもそのルームに join し、以後の更新を受け取る）
@@ -214,7 +220,9 @@ io.on('connection', (socket) => {
     }
     socket.data.studentRoom = roomId;
     socket.join(`room:${roomId}`);
-    if (cb) cb({ ok: true, question: publicQuestionView(room) });
+    const size = io.sockets.adapter.rooms.get(`room:${roomId}`)?.size || 0;
+    if (cb) cb({ ok: true, question: publicQuestionView(room), participantCount: size });
+    broadcastPresence(roomId);
   });
 
   // 新しい設問を作成（認証済みの先生のみ）
@@ -340,8 +348,14 @@ io.on('connection', (socket) => {
     if (cb) cb({ ok: true });
   });
 
-  socket.on('disconnect', () => {
-    // 特に処理不要（ルーム状態はソケットに紐付かない）
+  socket.on('disconnecting', () => {
+    const affectedRooms = Array.from(socket.rooms).filter((r) => r.startsWith('room:'));
+    process.nextTick(() => {
+      affectedRooms.forEach((r) => {
+        const roomId = r.slice('room:'.length);
+        broadcastPresence(roomId);
+      });
+    });
   });
 });
 

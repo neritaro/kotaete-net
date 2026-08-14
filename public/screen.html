@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="wrap">
+<div class="wrap" id="page-wrap">
   <p class="eyebrow">答えてネット</p>
   <h1 class="title">スクリーン / 先生用</h1>
   <p class="subtitle">投影用画面 兼 設問の作成・管理</p>
@@ -25,6 +25,16 @@
       <button id="login-btn">ログイン / ルームを開始</button>
     </div>
     <div id="login-msg"></div>
+  </div>
+
+  <!-- デモ体験（クイックスタート） -->
+  <div class="card" id="demo-card" style="display:none;">
+    <h3 style="margin-top:0;">まずは触ってみる</h3>
+    <p class="subtitle" style="margin-bottom:16px;">入力なしでサンプル設問をすぐに開始できます。QRコードが出たら、ご自身のスマホで読み取って体験してみてください。</p>
+    <div class="row">
+      <button id="demo-choice-btn" type="button">選択式を試す</button>
+      <button id="demo-wordcloud-btn" type="button" class="secondary">ワードクラウドを試す</button>
+    </div>
   </div>
 
   <!-- 設問作成フォーム -->
@@ -62,11 +72,12 @@
 
   <!-- 現在の設問 & QR & 結果 -->
   <div id="live-card" style="display:none;">
-    <div class="card">
+    <div class="card" id="control-card">
       <div class="row" style="align-items:center; justify-content:space-between; flex-wrap:wrap;">
         <div>
           <span class="pill" id="live-status"></span>
           <span class="pill" id="live-anon" style="margin-left:6px; background:rgba(179,157,219,0.18); color:var(--violet); border:1px solid rgba(179,157,219,0.4);"></span>
+          <span class="pill presence-pill" id="live-presence" style="margin-left:6px;"></span>
           <h2 id="live-title" style="margin: 10px 0 4px;"></h2>
           <div class="code-display" id="live-code"></div>
         </div>
@@ -75,6 +86,7 @@
       <div class="row" style="margin-top:18px;">
         <button class="danger" id="close-btn">受付を終了する</button>
         <button class="secondary" id="new-question-btn">新しい設問を作る</button>
+        <button class="secondary" id="projector-btn" type="button">投影モードで表示</button>
       </div>
     </div>
 
@@ -86,7 +98,7 @@
           <button class="secondary" id="export-png-btn" type="button">画像で保存</button>
         </div>
       </div>
-      <div class="total-count" id="total-count"></div>
+      <div class="total-count" id="total-count">合計 0 件の回答</div>
       <div id="results-choice"></div>
       <div id="results-wordcloud" class="wordcloud-box"></div>
       <div id="results-text" class="text-answers"></div>
@@ -96,12 +108,36 @@
   <p class="footer-note">学生用ページ： <span id="student-url"></span></p>
 </div>
 
+<!-- 投影モード用オーバーレイ -->
+<div id="projector-overlay" class="projector-overlay" style="display:none;">
+  <div class="projector-inner">
+    <div class="projector-head">
+      <div class="projector-title" id="proj-title"></div>
+      <div class="projector-code" id="proj-code"></div>
+      <div class="projector-meta">
+        <span id="proj-presence"><i>●</i> 参加者 0人</span>
+        <span id="proj-status" class="pill open">受付中</span>
+      </div>
+    </div>
+    <div class="projector-body">
+      <div class="projector-results">
+        <div id="proj-results-choice"></div>
+        <div id="proj-results-wordcloud" class="wordcloud-box"></div>
+        <div id="proj-results-text" class="text-answers"></div>
+      </div>
+      <div class="projector-qr" id="proj-qr"></div>
+    </div>
+    <button id="exit-projector-btn" class="secondary" type="button">投影モードを終了</button>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
 const socket = io();
 
 const loginCard = document.getElementById('login-card');
+const demoCard = document.getElementById('demo-card');
 const createCard = document.getElementById('create-card');
 const liveCard = document.getElementById('live-card');
 const roomIdInput = document.getElementById('room-id-input');
@@ -111,6 +147,7 @@ const loginMsg = document.getElementById('login-msg');
 let currentRoom = null;
 let currentQuestion = null;
 let currentResults = null;
+let lastTotal = 0;
 
 // ルームIDはブラウザに記憶しておく（毎回入力しなくて済むように）
 const savedRoom = localStorage.getItem('kotaete_room_id');
@@ -144,12 +181,32 @@ function doLogin() {
       renderLive(currentQuestion);
       renderResults(currentResults);
     } else {
+      demoCard.style.display = 'block';
       createCard.style.display = 'block';
     }
   });
 }
 document.getElementById('login-btn').addEventListener('click', doLogin);
 pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+// --- デモ設問（クリックゼロで体験） ---
+document.getElementById('demo-choice-btn').addEventListener('click', () => {
+  socket.emit('question:create', {
+    type: 'choice',
+    title: '今日の気分にいちばん近いのは？',
+    choices: ['やる気満々', 'ふつう', 'ちょっと眠い', 'お腹すいた'],
+    keyword: '',
+    anonymous: true,
+  }, () => {});
+});
+document.getElementById('demo-wordcloud-btn').addEventListener('click', () => {
+  socket.emit('question:create', {
+    type: 'wordcloud',
+    title: '今の気分を一言で',
+    keyword: '',
+    anonymous: true,
+  }, () => {});
+});
 
 // --- 選択肢の動的フォーム ---
 const choicesList = document.getElementById('choices-list');
@@ -197,12 +254,14 @@ document.getElementById('close-btn').addEventListener('click', () => {
 
 document.getElementById('new-question-btn').addEventListener('click', () => {
   liveCard.style.display = 'none';
+  demoCard.style.display = 'block';
   createCard.style.display = 'block';
 });
 
 // --- 状態の反映 ---
 socket.on('question:update', (q) => {
   currentQuestion = q;
+  lastTotal = 0;
   renderLive(q);
 });
 
@@ -211,13 +270,24 @@ socket.on('results:update', (results) => {
   renderResults(results);
 });
 
+let presenceCount = 0;
+socket.on('presence:update', ({ count }) => {
+  presenceCount = count;
+  const el = document.getElementById('live-presence');
+  if (el) el.textContent = `参加者 ${count}人`;
+  const projEl = document.getElementById('proj-presence');
+  if (projEl) projEl.innerHTML = `<i>●</i> 参加者 ${count}人`;
+});
+
 function renderLive(q) {
   if (!q) return;
+  demoCard.style.display = 'none';
   createCard.style.display = 'none';
   liveCard.style.display = 'block';
 
   document.getElementById('live-title').textContent = q.title;
   document.getElementById('live-code').textContent = q.code;
+  document.getElementById('live-presence').textContent = `参加者 ${presenceCount}人`;
   const statusEl = document.getElementById('live-status');
   statusEl.textContent = q.status === 'open' ? '受付中' : '受付終了';
   statusEl.className = 'pill ' + (q.status === 'open' ? 'open' : 'closed');
@@ -225,6 +295,12 @@ function renderLive(q) {
 
   const anonEl = document.getElementById('live-anon');
   anonEl.textContent = q.anonymous ? '匿名' : '記名式';
+
+  document.getElementById('proj-title').textContent = q.title;
+  document.getElementById('proj-code').textContent = q.code;
+  const projStatus = document.getElementById('proj-status');
+  projStatus.textContent = q.status === 'open' ? '受付中' : '受付終了';
+  projStatus.className = 'pill ' + (q.status === 'open' ? 'open' : 'closed');
 
   loadQr();
 }
@@ -236,16 +312,41 @@ function loadQr() {
     document.getElementById('qr-box').innerHTML =
       `<img src="${data.dataUrl}" width="160" height="160" alt="QRコード">
        <div class="url">${data.url}</div>`;
+    document.getElementById('proj-qr').innerHTML =
+      `<img src="${data.dataUrl}" width="220" height="220" alt="QRコード">
+       <div class="url">${data.url}</div>`;
   });
 }
 
 function renderResults(results) {
   if (!results) return;
-  document.getElementById('total-count').textContent = `合計 ${results.total} 件の回答`;
 
-  const choiceEl = document.getElementById('results-choice');
-  const wordcloudEl = document.getElementById('results-wordcloud');
-  const textEl = document.getElementById('results-text');
+  // 回答数のカウントアップ演出
+  animateCount('total-count', results.total, '合計 ', ' 件の回答');
+
+  renderResultsInto(results, 'results-choice', 'results-wordcloud', 'results-text');
+  renderResultsInto(results, 'proj-results-choice', 'proj-results-wordcloud', 'proj-results-text');
+
+  lastTotal = results.total;
+}
+
+function animateCount(elId, target, prefix, suffix) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = `${prefix}${target}${suffix}`;
+  if (target > lastTotal) {
+    el.classList.remove('count-bump');
+    void el.offsetWidth; // reflow でアニメーションを再トリガー
+    el.classList.add('count-bump');
+  }
+}
+
+function renderResultsInto(results, choiceElId, wordcloudElId, textElId) {
+  const choiceEl = document.getElementById(choiceElId);
+  const wordcloudEl = document.getElementById(wordcloudElId);
+  const textEl = document.getElementById(textElId);
+  if (!choiceEl || !wordcloudEl || !textEl) return;
+
   choiceEl.style.display = 'none';
   wordcloudEl.style.display = 'none';
   textEl.style.display = 'none';
@@ -270,7 +371,7 @@ function renderResults(results) {
       const min = Math.min(...results.words.map(w => w.count));
       wordcloudEl.innerHTML = results.words.map((w, i) => {
         const scale = max === min ? 0.6 : (w.count - min) / (max - min);
-        const size = 1.0 + scale * 2.4; // rem: 1.0〜3.4
+        const size = 1.0 + scale * 2.4;
         const cls = `wc-c${i % 6}`;
         return `<span class="wc-word ${cls}" style="font-size:${size}rem;" title="${w.count}件">${escapeHtml(w.text)}</span>`;
       }).join('');
@@ -281,6 +382,25 @@ function renderResults(results) {
       const namePrefix = item.name ? `<span class="chip-name">${escapeHtml(item.name)}：</span>` : '';
       return `<div class="text-answer-chip">${namePrefix}${escapeHtml(item.text)}</div>`;
     }).join('') || '<span style="color:var(--chalk-dim)">まだ回答がありません</span>';
+  }
+}
+
+// --- 投影モード ---
+const projectorOverlay = document.getElementById('projector-overlay');
+document.getElementById('projector-btn').addEventListener('click', () => {
+  projectorOverlay.style.display = 'flex';
+  if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+});
+document.getElementById('exit-projector-btn').addEventListener('click', exitProjector);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && projectorOverlay.style.display === 'flex') exitProjector();
+});
+function exitProjector() {
+  projectorOverlay.style.display = 'none';
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
   }
 }
 
@@ -299,7 +419,7 @@ document.getElementById('export-csv-btn').addEventListener('click', () => {
     currentResults.items.forEach(item => rows.push([item.name || '(匿名)', item.text]));
   }
   const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
-  const bom = '\uFEFF'; // Excelでの文字化け防止
+  const bom = '\uFEFF';
   downloadBlob(bom + csv, `${currentQuestion.title}_結果.csv`, 'text/csv;charset=utf-8;');
 });
 

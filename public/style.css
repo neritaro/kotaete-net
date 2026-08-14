@@ -268,6 +268,111 @@ button.danger { background: var(--coral); color: #2a1414; }
   font-size: 0.85em;
 }
 
+.qr-hint {
+  background: rgba(255, 200, 87, 0.1);
+  border: 1px solid rgba(255, 200, 87, 0.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  color: var(--chalk-dim);
+  margin-bottom: 16px;
+}
+
+.presence-pill {
+  background: rgba(126, 200, 227, 0.18);
+  color: var(--sky);
+  border: 1px solid rgba(126, 200, 227, 0.4);
+}
+
+.count-bump {
+  display: inline-block;
+  animation: bump 0.4s ease;
+}
+@keyframes bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.18); color: var(--amber); }
+  100% { transform: scale(1); }
+}
+
+.projector-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--board);
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+.projector-inner {
+  width: 100%;
+  max-width: 1100px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.projector-head {
+  text-align: center;
+}
+.projector-title {
+  font-size: 2.2rem;
+  font-weight: 700;
+  font-family: 'Kosugi Maru', sans-serif;
+  margin-bottom: 6px;
+}
+.projector-code {
+  font-size: 3.6rem;
+  font-weight: 900;
+  color: var(--amber);
+  font-family: 'Kosugi Maru', sans-serif;
+  letter-spacing: 0.12em;
+}
+.projector-meta {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  font-size: 1rem;
+  color: var(--chalk-dim);
+}
+.projector-meta i {
+  color: var(--teal);
+  font-style: normal;
+}
+.projector-body {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.projector-results {
+  flex: 2;
+  min-width: 320px;
+}
+.projector-results .bar-label { font-size: 1.15rem; }
+.projector-results .bar-track { height: 44px; }
+.projector-results .wc-word { font-weight: 700; }
+.projector-qr {
+  flex: 1;
+  min-width: 240px;
+  text-align: center;
+  background: var(--chalk);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.projector-qr .url { color: var(--board-dark); font-size: 0.9rem; margin-top: 12px; word-break: break-all; }
+#exit-projector-btn {
+  align-self: center;
+  margin-top: 8px;
+}
+
+@media (max-width: 700px) {
+  .projector-title { font-size: 1.5rem; }
+  .projector-code { font-size: 2.4rem; }
+  .projector-body { flex-direction: column; }
+}
+
 .footer-note {
   text-align: center;
   color: var(--chalk-dim);
