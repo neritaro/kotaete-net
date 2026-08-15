@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>答えてネット | 結果を見る</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* iframe埋め込み時に不要な余白を減らす */
+  body { background: transparent; }
+  .watch-wrap { max-width: 640px; margin: 0 auto; padding: 20px; }
+  .watch-live-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--teal);
+    margin-right: 6px;
+    animation: watchPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes watchPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+</style>
+</head>
+<body>
+<div class="watch-wrap">
+  <div id="waiting-msg" class="center-note">
+    <div style="font-size:2rem;">⏳</div>
+    <p id="waiting-text">読み込み中…</p>
+  </div>
+
+  <div id="content" style="display:none;">
+    <p class="eyebrow"><span class="watch-live-dot"></span>ライブ結果</p>
+    <h2 id="q-title" style="margin:6px 0 4px;"></h2>
+    <div class="total-count" id="total-count">合計 0 件の回答</div>
+
+    <div id="results-choice"></div>
+    <div id="results-wordcloud" class="wordcloud-box"></div>
+    <div id="results-text" class="text-answers"></div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const params = new URLSearchParams(location.search);
+const roomId = params.get('room') || '';
+
+const waitingMsg = document.getElementById('waiting-msg');
+const waitingText = document.getElementById('waiting-text');
+const content = document.getElementById('content');
+
+let lastTotal = 0;
+
+if (!roomId) {
+  waitingText.textContent = 'URLに ?room=ルームID を指定してください。';
+} else {
+  socket.emit('room:watch', { roomId }, (res) => {
+    if (!res.ok) {
+      waitingText.textContent = res.error;
+      return;
+    }
+    if (res.question) {
+      renderQuestion(res.question);
+      renderResults(res.results);
+    } else {
+      waitingText.textContent = 'まだ設問が開始されていません。少々お待ちください…';
+    }
+  });
+}
+
+socket.on('question:update', (q) => {
+  lastTotal = 0;
+  renderQuestion(q);
+});
+socket.on('results:update', (results) => renderResults(results));
+
+function renderQuestion(q) {
+  if (!q) return;
+  waitingMsg.style.display = 'none';
+  content.style.display = 'block';
+  document.getElementById('q-title').textContent = q.title;
+}
+
+function renderResults(results) {
+  if (!results) return;
+  const totalEl = document.getElementById('total-count');
+  totalEl.textContent = `合計 ${results.total} 件の回答`;
+  if (results.total > lastTotal) {
+    totalEl.classList.remove('count-bump');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('count-bump');
+  }
+  lastTotal = results.total;
+
+  const choiceEl = document.getElementById('results-choice');
+  const wordcloudEl = document.getElementById('results-wordcloud');
+  const textEl = document.getElementById('results-text');
+  choiceEl.style.display = 'none';
+  wordcloudEl.style.display = 'none';
+  textEl.style.display = 'none';
+
+  if (results.type === 'choice') {
+    choiceEl.style.display = 'block';
+    const max = Math.max(1, ...results.counts);
+    choiceEl.innerHTML = results.choices.map((c, i) => {
+      const count = results.counts[i];
+      const pct = Math.max(4, Math.round((count / max) * 100));
+      return `<div class="bar-row">
+        <div class="bar-label"><span>${i + 1}. ${escapeHtml(c)}</span><span>${count}</span></div>
+        <div class="bar-track"><div class="bar-fill c${i % 6}" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('');
+  } else if (results.type === 'wordcloud') {
+    wordcloudEl.style.display = 'flex';
+    if (results.words.length === 0) {
+      wordcloudEl.innerHTML = '<span style="color:var(--chalk-dim)">まだ回答がありません</span>';
+    } else {
+      const max = Math.max(...results.words.map(w => w.count));
+      const min = Math.min(...results.words.map(w => w.count));
+      wordcloudEl.innerHTML = results.words.map((w, i) => {
+        const scale = max === min ? 0.6 : (w.count - min) / (max - min);
+        const size = 1.0 + scale * 2.0;
+        const cls = `wc-c${i % 6}`;
+        return `<span class="wc-word ${cls}" style="font-size:${size}rem;" title="${w.count}件">${escapeHtml(w.text)}</span>`;
+      }).join('');
+    }
+  } else {
+    textEl.style.display = 'flex';
+    textEl.innerHTML = results.items.slice().reverse().map(item => {
+      const namePrefix = item.name ? `<span class="chip-name">${escapeHtml(item.name)}：</span>` : '';
+      return `<div class="text-answer-chip">${namePrefix}${escapeHtml(item.text)}</div>`;
+    }).join('') || '<span style="color:var(--chalk-dim)">まだ回答がありません</span>';
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

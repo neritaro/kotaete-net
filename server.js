@@ -225,6 +225,29 @@ io.on('connection', (socket) => {
     broadcastPresence(roomId);
   });
 
+  // 観覧用（読み取り専用）の参加：パスワード不要。結果を見るだけで、
+  // 設問の作成・終了・回答送信はできない。Webサイト埋め込み等の用途を想定。
+  socket.on('room:watch', ({ roomId }, cb) => {
+    roomId = String(roomId || '').trim();
+    if (!ROOM_ID_RE.test(roomId)) {
+      if (cb) cb({ ok: false, error: 'ルームIDが不正です。' });
+      return;
+    }
+    const room = rooms.get(roomId);
+    if (!room) {
+      if (cb) cb({ ok: false, error: 'このルームはまだ開始されていません。' });
+      return;
+    }
+    socket.join(`room:${roomId}`);
+    if (cb) {
+      cb({
+        ok: true,
+        question: publicQuestionView(room),
+        results: computeResults(room),
+      });
+    }
+  });
+
   // 新しい設問を作成（認証済みの先生のみ）
   socket.on('question:create', (payload, cb) => {
     const roomId = socket.data.teacherRoom;
