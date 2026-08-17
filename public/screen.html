@@ -85,6 +85,7 @@
       </div>
       <div class="row" style="margin-top:18px;">
         <button class="danger" id="close-btn">受付を終了する</button>
+        <button class="secondary" id="restore-btn" type="button" style="display:none;">前の設問に戻す</button>
         <button class="secondary" id="new-question-btn">新しい設問を作る</button>
         <button class="secondary" id="projector-btn" type="button">投影モードで表示</button>
       </div>
@@ -184,6 +185,7 @@ function doLogin() {
       demoCard.style.display = 'block';
       createCard.style.display = 'block';
     }
+    updateRestoreButtonVisibility(res.canRestore);
   });
 }
 document.getElementById('login-btn').addEventListener('click', doLogin);
@@ -197,7 +199,9 @@ document.getElementById('demo-choice-btn').addEventListener('click', () => {
     choices: ['やる気満々', 'ふつう', 'ちょっと眠い', 'お腹すいた'],
     keyword: '',
     anonymous: true,
-  }, () => {});
+  }, (res) => {
+    if (res.ok) updateRestoreButtonVisibility(res.canRestore);
+  });
 });
 document.getElementById('demo-wordcloud-btn').addEventListener('click', () => {
   socket.emit('question:create', {
@@ -205,7 +209,9 @@ document.getElementById('demo-wordcloud-btn').addEventListener('click', () => {
     title: '今の気分を一言で',
     keyword: '',
     anonymous: true,
-  }, () => {});
+  }, (res) => {
+    if (res.ok) updateRestoreButtonVisibility(res.canRestore);
+  });
 });
 
 // --- 選択肢の動的フォーム ---
@@ -245,6 +251,7 @@ document.getElementById('create-btn').addEventListener('click', () => {
       return;
     }
     showMsg(document.getElementById('create-msg'), '', '');
+    updateRestoreButtonVisibility(res.canRestore);
   });
 });
 
@@ -252,10 +259,21 @@ document.getElementById('close-btn').addEventListener('click', () => {
   socket.emit('question:close', () => {});
 });
 
+document.getElementById('restore-btn').addEventListener('click', () => {
+  socket.emit('question:restore', (res) => {
+    if (!res.ok) {
+      showMsg(document.getElementById('create-msg'), res.error, 'error');
+      return;
+    }
+    updateRestoreButtonVisibility(res.canRestore);
+  });
+});
+
 document.getElementById('new-question-btn').addEventListener('click', () => {
   liveCard.style.display = 'none';
   demoCard.style.display = 'block';
   createCard.style.display = 'block';
+  updateRestoreButtonVisibility(false);
 });
 
 // --- 状態の反映 ---
@@ -278,6 +296,11 @@ socket.on('presence:update', ({ count }) => {
   const projEl = document.getElementById('proj-presence');
   if (projEl) projEl.innerHTML = `<i>●</i> 参加者 ${count}人`;
 });
+
+function updateRestoreButtonVisibility(canRestore) {
+  const btn = document.getElementById('restore-btn');
+  btn.style.display = canRestore ? 'block' : 'none';
+}
 
 function renderLive(q) {
   if (!q) return;

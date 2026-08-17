@@ -55,6 +55,7 @@ app.get('/api/health', (req, res) => {
 //   password,
 //   question: { id, code, type: 'choice'|'text'|'wordcloud', title,
 //               choices, anonymous, color, status: 'open'|'closed', createdAt } | null,
+//   questionHistory: [...previous questions, max 3],
 //   answers: [{ choiceIndex? , text?, name? }],
 //   lastActivity: timestamp   // 未使用ルームの掃除用
 // }
@@ -184,12 +185,14 @@ io.on('connection', (socket) => {
     let room = rooms.get(roomId);
     if (!room) {
       // 新規ルーム作成
-      room = { password, question: null, answers: [], lastActivity: Date.now() };
+      room = { password, question: null, questionHistory: [], answers: [], lastActivity: Date.now() };
       rooms.set(roomId, room);
     } else if (room.password !== password) {
       if (cb) cb({ ok: false, error: 'ルームIDまたはパスワードが違います。' });
       return;
     }
+    // 既存ルームにもhistoryがなければ初期化
+    if (!room.questionHistory) room.questionHistory = [];
     room.lastActivity = Date.now();
     touchActivity();
 
@@ -201,6 +204,7 @@ io.on('connection', (socket) => {
         ok: true,
         question: publicQuestionView(room),
         results: computeResults(room),
+        canRestore: room.questionHistory && room.questionHistory.length > 0,
       });
     }
     broadcastPresence(roomId);
@@ -284,6 +288,15 @@ io.on('connection', (socket) => {
 
     const titleDefault = { choice: '設問', text: '自由記述', wordcloud: '一言でどうぞ' }[type];
 
+    // 現在の設問を履歴に保存（新規作成前に）
+    if (room.question) {
+      room.questionHistory.push(room.question);
+      // 履歴は最大3つまで保持
+      if (room.questionHistory.length > 3) {
+        room.questionHistory.shift();
+      }
+    }
+
     room.question = {
       id: Date.now().toString(36),
       code,
@@ -301,7 +314,7 @@ io.on('connection', (socket) => {
 
     broadcastQuestion(roomId, room);
     broadcastResults(roomId, room);
-    if (cb) cb({ ok: true, question: publicQuestionView(room) });
+    if (cb) cb({ ok: true, question: publicQuestionView(room), canRestore: room.questionHistory && room.questionHistory.length > 0 });
   });
 
   // 設問の受付終了（先生のみ）
@@ -317,6 +330,30 @@ io.on('connection', (socket) => {
       broadcastQuestion(roomId, room);
     }
     if (cb) cb({ ok: true });
+  });
+
+  // 前の設問に戻す（先生のみ）
+  socket.on('question:restore', (cb) => {
+    const roomId = socket.data.teacherRoom;
+    const room = roomId && rooms.get(roomId);
+    if (!room || !room.questionHistory || room.questionHistory.length === 0) {
+      if (cb) cb({ ok: false, error: '戻すことができる設問がありません。' });
+      return;
+    }
+    // 現在の設問を履歴に戻す
+    if (room.question) {
+      room.questionHistory.unshift(room.question);
+    }
+    // 履歴の最後から1つ取出して現在の設問に戻す
+    room.question = room.questionHistory.pop();
+    room.question.status = 'open'; // 戻した設問は受付中に
+    room.answers = []; // 回答はリセット
+    room.lastActivity = Date.now();
+    touchActivity();
+
+    broadcastQuestion(roomId, room);
+    broadcastResults(roomId, room);
+    if (cb) cb({ ok: true, question: publicQuestionView(room), canRestore: room.questionHistory && room.questionHistory.length > 0 });
   });
 
   // 回答送信
